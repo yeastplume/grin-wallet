@@ -1168,8 +1168,10 @@ where
 		}
 	};
 
-	let start_index = last_scanned_block.height.saturating_sub(100);
-
+	let mut start_index = last_scanned_block.height.saturating_sub(100);
+	if start_index == 0 {
+		start_index = 1;
+	}
 	if last_scanned_block.height == 0 {
 		let msg = "This wallet has not been scanned against the current chain. Beginning full scan... (this first scan may take a while, but subsequent scans will be much quicker)".to_string();
 		if let Some(ref s) = status_send_channel {
