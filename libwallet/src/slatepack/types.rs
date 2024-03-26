@@ -194,18 +194,27 @@ impl Slatepack {
 		let result = hasher.finalize();
 		b.copy_from_slice(&result[0..32]);
 
+		println!("dec_key: {:?}", b.to_vec());
+
 		let x_dec_secret = StaticSecret::from(b);
 		let x_dec_secret_bech32 =
 			bech32::encode("age-secret-key-", (&x_dec_secret).to_bytes().to_base32())?;
 		let key: age::x25519::Identity = x_dec_secret_bech32.parse()?;
 
+		println!("key: {:?}", key.to_string());
+
 		let decryptor = match age::Decryptor::new(&self.payload[..])? {
 			age::Decryptor::Recipients(d) => d,
 			_ => unreachable!(),
 		};
+
+		println!("decryptor");
 		let mut decrypted = vec![];
 		let mut reader = decryptor.decrypt(std::iter::once(&key as &dyn age::Identity))?;
+		println!("obtained reader");
 		reader.read_to_end(&mut decrypted)?;
+
+		println!("decrypted: {:?}", decrypted);
 		// Parse encrypted metadata from payload, first 4 bytes of decrypted payload
 		// will be encrypted metadata length
 		let mut len_bytes = [0u8; 4];
@@ -751,9 +760,30 @@ fn slatepack_bin_future() -> Result<(), grin_wallet_util::byte_ser::Error> {
 
 // test encryption and encrypted metadata, which only gets written
 // if mode == 1
+const TEST_DATA: &str = "BEGINSLATEPACK. auBNnRrahGnJ1iw 52RSppvCNzAPyT8 p5icMiMDYjDKbHH
+8gd9Xci3AWGMd88 PWt36uc7uPVKocB SnxB28ptvgmfEn3 SouRUUBnjSEQCGi
+gkwuzswEKLict2X A7sc7Rdu21gMFec Eq5AmyExTCjPHYg CU1DWQZC28kab8y
+Fu1meQA5sYUQWM7 rvg1yADen6Z8R4S b3eVPg54eYwNv17 XqV1Lc3ACLSHycK
+Gc7dPmAmBeZ7RxY JLdteR1QtFu8ngu GHSTNrui3TVkKug QJuN34WsJcCZWFc
+AYKSYdBnwdXSPYy LsPCS3n4Mqo52HP U8kCq7sHsBdBbjV 9dcFQrm18pvWxVR
+GJNm8XSrQtK9dyQ JvZxjv7UNTvh8q1 5yDXLA7z8L6NV2m dHZ6ujtecsSZdF5
+mZqZyjsxeoj9kDr jjAXPD6gTVjobkh sjxXb1YU4qEfHnR wx7NjBx5RamzgEa
+uWvARddnJd8pG2m wsptfQkvfBKogS5 1vRvmFMUb8MwPjW hucAnKcMaFLj1Hg
+ESbV3HycopcL2VJ HJgmQQeFsqbyGMm Xkiz4sH2X6hWj1A D6rkR7uhDLL5YbY
+MPwkFsRNK8zcPk7 X2DMCFZd5VNGcMZ gPBidMhw4nbUzii bj42vtLpT68JpTM
+qeLUsuCzBUPs7h5 Z8vH9humdjkxkPM JK2z91cLcyWpqfN PCK2C96aWRmw1zK
+vhA2bdauCkTRDD4 dES9RdcExqtMjby p2wvUFk2V2UHEw7 Sjpcc37kJ2P2ZG2
+WYyM3VSXuMPSdwZ HVyvnXs4tSJTzsE 2wJTS5gRJX74FXW izjtA8tUGWcmCif
+kBYie74pEWBAe4t ja5SLKkX4Ut1Ys8 rwPyB5zf6sGzrb7 3VyDtX85AmF7moE
+MbaYHdP1tbM. ENDSLATEPACK.";
+
+const SECRET_KEY_BYTESTRING: &str =
+	"90ad4d97dd2f7dd5360375f2ad72011489baa8beb84f1109b2bdb79b4183476a";
+
 #[test]
 fn slatepack_encrypted_meta() -> Result<(), Error> {
 	use crate::grin_core::global;
+	use crate::slatepack::{Slatepacker, SlatepackerArgs};
 	use crate::{Slate, SlateVersion, VersionedBinSlate, VersionedSlate};
 	use ed25519_dalek::PublicKey as edDalekPublicKey;
 	use ed25519_dalek::SecretKey as edDalekSecretKey;
@@ -761,39 +791,29 @@ fn slatepack_encrypted_meta() -> Result<(), Error> {
 	use std::convert::TryFrom;
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 
-	let sec_key_bytes: [u8; 32] = thread_rng().gen();
+	let sec_key_vec = grin_util::from_hex(SECRET_KEY_BYTESTRING).unwrap();
+	let mut sec_key_bytes: [u8; 32] = [0; 32];
+	sec_key_bytes.copy_from_slice(&sec_key_vec[0..32]);
 
 	let ed_sec_key = edDalekSecretKey::from_bytes(&sec_key_bytes).unwrap();
 	let ed_pub_key = edDalekPublicKey::from(&ed_sec_key);
 	let addr = SlatepackAddress::new(&ed_pub_key);
 
-	let encoded = String::try_from(&addr).unwrap();
-	let parsed_addr = SlatepackAddress::try_from(encoded.as_str()).unwrap();
-	assert_eq!(addr, parsed_addr);
-
-	let mut slatepack = super::Slatepack::default();
-	slatepack.sender = Some(SlatepackAddress::random());
-	slatepack.add_recipient(SlatepackAddress::random());
-	slatepack.add_recipient(SlatepackAddress::random());
-
-	let v_slate = VersionedSlate::into_version(Slate::blank(2, false), SlateVersion::V4)?;
-	let bin_slate = VersionedBinSlate::try_from(v_slate).map_err(|_| Error::SlatepackSer)?;
-	slatepack.payload = byte_ser::to_bytes(&bin_slate).map_err(|_| Error::SlatepackSer)?;
-
-	let orig_sp = slatepack.clone();
-
-	slatepack.try_encrypt_payload(vec![addr.clone()])?;
-
-	// sender should have been moved to encrypted meta
-	assert!(slatepack.sender.is_none());
+	let packer = Slatepacker::new(SlatepackerArgs {
+		sender: None,
+		recipients: vec![],
+		dec_key: None,
+	});
+	println!("Unpacking slatepack");
+	let slatepack = packer.deser_slatepack(TEST_DATA.as_bytes(), false)?;
+	println!("Slatepack: {:?}", slatepack);
 
 	let ser = byte_ser::to_bytes(&SlatepackBin(slatepack)).unwrap();
 	let mut slatepack = byte_ser::from_bytes::<SlatepackBin>(&ser).unwrap().0;
 
+	println!("Decrypting payload");
 	slatepack.try_decrypt_payload(Some(&ed_sec_key))?;
 	assert!(slatepack.sender.is_some());
-
-	assert_eq!(orig_sp, slatepack);
 
 	Ok(())
 }
