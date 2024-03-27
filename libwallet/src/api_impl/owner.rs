@@ -139,8 +139,12 @@ where
 	let parent_key_id = w.parent_key_id();
 	let k = w.keychain(keychain_mask)?;
 	let sec_addr_key = address::address_from_derivation_path(&k, &parent_key_id, index)?;
+	println!("(GRIN) SEC ADDDR KEY: {}", sec_addr_key.to_hex());
 	let d_skey = match DalekSecretKey::from_bytes(&sec_addr_key.0) {
-		Ok(k) => k,
+		Ok(k) => {
+			println!("(ED25519 SEC ADDR KEY: {}", k.to_hex());
+			k
+		}
 		Err(e) => {
 			return Err(OnionV3AddressError::InvalidPrivateKey(format!(
 				"Unable to create secret key: {}",
@@ -256,6 +260,8 @@ where
 				keychain_mask,
 				index,
 			)?);
+
+			//println!("DEC KEY: {}", dec_key.as_ref().unwrap().0.to_hex());
 			let packer = Slatepacker::new(SlatepackerArgs {
 				sender: None,
 				recipients: vec![],

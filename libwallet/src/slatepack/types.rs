@@ -220,11 +220,16 @@ impl Slatepack {
 		let mut len_bytes = [0u8; 4];
 		len_bytes.copy_from_slice(&decrypted[0..4]);
 		let meta_len = Cursor::new(len_bytes).read_u32::<BigEndian>()?;
+		println!("META LEN IS: {}", meta_len);
 		self.payload = decrypted.split_off(meta_len as usize + 4);
 		let meta = byte_ser::from_bytes::<SlatepackEncMetadataBin>(&decrypted)
-			.map_err(|_| Error::SlatepackSer)?
+			.map_err(|x| {
+				println!("WAS ERROR: {:?}", x);
+				Error::SlatepackSer
+			})?
 			.0;
 		self.sender = meta.sender;
+		println!("meta.recipients: {:?}", meta.recipients);
 		self.encrypted_meta.recipients = meta.recipients;
 		self.mode = 0;
 
@@ -606,6 +611,8 @@ impl Readable for SlatepackEncMetadataBin {
 			None
 		};
 
+		print!("bytes_remaining: {}", bytes_remaining);
+
 		let mut recipients = vec![];
 		if opt_flags & 0x02 > 0 {
 			// number of recipients
@@ -780,8 +787,11 @@ MbaYHdP1tbM. ENDSLATEPACK.";
 const SECRET_KEY_BYTESTRING: &str =
 	"90ad4d97dd2f7dd5360375f2ad72011489baa8beb84f1109b2bdb79b4183476a";
 
+const SECRET_KEY_BYTESTRING_2: &str =
+	"7f7394cd934ba03a26d5774ef45b5969670d0ce1e4bbc1174e6a871f507af0dd";
+
 #[test]
-fn slatepack_encrypted_meta() -> Result<(), Error> {
+fn slatepack_encrypted_metax() -> Result<(), Error> {
 	use crate::grin_core::global;
 	use crate::slatepack::{Slatepacker, SlatepackerArgs};
 	use crate::{Slate, SlateVersion, VersionedBinSlate, VersionedSlate};
@@ -791,7 +801,7 @@ fn slatepack_encrypted_meta() -> Result<(), Error> {
 	use std::convert::TryFrom;
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 
-	let sec_key_vec = grin_util::from_hex(SECRET_KEY_BYTESTRING).unwrap();
+	let sec_key_vec = grin_util::from_hex(SECRET_KEY_BYTESTRING_2).unwrap();
 	let mut sec_key_bytes: [u8; 32] = [0; 32];
 	sec_key_bytes.copy_from_slice(&sec_key_vec[0..32]);
 
@@ -805,7 +815,7 @@ fn slatepack_encrypted_meta() -> Result<(), Error> {
 		dec_key: None,
 	});
 	println!("Unpacking slatepack");
-	let slatepack = packer.deser_slatepack(TEST_DATA.as_bytes(), false)?;
+	let slatepack = packer.deser_slatepack(TEST_DATA.as_bytes(), true)?;
 	println!("Slatepack: {:?}", slatepack);
 
 	let ser = byte_ser::to_bytes(&SlatepackBin(slatepack)).unwrap();
@@ -814,6 +824,9 @@ fn slatepack_encrypted_meta() -> Result<(), Error> {
 	println!("Decrypting payload");
 	slatepack.try_decrypt_payload(Some(&ed_sec_key))?;
 	assert!(slatepack.sender.is_some());
+
+	println!("Slatepack sender: {:?}", slatepack.sender);
+	println!("Slatepack meta: {:?}", slatepack.encrypted_meta);
 
 	Ok(())
 }
